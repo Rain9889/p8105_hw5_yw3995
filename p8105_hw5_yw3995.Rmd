@@ -1,0 +1,85 @@
+---
+title: "p8105_hw5_yw3995"
+author: "Yuxuan Wang"
+date: "2023-11-11"
+output: github_document
+---
+
+```{r, message = FALSE}
+library(readr)
+library(tidyverse)
+library(rvest)
+library(ggplot2)
+```
+
+# Problem 1
+
+```{r, message = FALSE}
+raw_data = "https://raw.githubusercontent.com/washingtonpost/data-homicides/master/homicide-data.csv"
+
+raw_data = read.csv(raw_data)
+```
+
+* Raw data describe the homicides in 50 large U.S. cities, which contains **`r ncol(raw_data)`** variables and **`r nrow(raw_data)`** observations.
+* Raw data has lots of variables, such as: `r names(raw_data)`, and the key variables are **city, state, disposition**.
+
+```{r, message = FALSE}
+tidy_data =
+  raw_data |> 
+  mutate(city_state = paste(city, state, sep = ", ")) |> 
+  group_by(city_state) |> 
+  summarise(
+    total_homicides = n(), 
+    unsolved_homicides = sum(disposition %in% c("Closed without arrest", "Open/No arrest"))  
+  )
+
+tidy_data = tidy_data[tidy_data$city_state != "Tulsa, AL", ] 
+
+tidy_data
+```
+
+```{r, message = FALSE}
+baltimore_df = raw_data |> 
+  mutate(city_state = paste(city, state, sep = ", ")) |> 
+  mutate(disposition = ifelse(disposition == "Closed by arrest", "homicides", "unsolved_homicides")) |> 
+  filter(city_state == "Baltimore, MD")
+
+baltimore_result = prop.test(x = sum(baltimore_df$disposition %in% c("unsolved_homicides")), n = nrow(baltimore_df), correct = FALSE)
+
+baltimore_result_tidy = broom::tidy(baltimore_result) |> 
+  mutate(confidence_intervals = paste(conf.low, conf.high, sep = ", ")) |> 
+  rename(estimated_proportion = estimate) |> 
+  select(estimated_proportion, confidence_intervals) 
+
+baltimore_result_tidy
+```
+
+```{r, message = FALSE}
+city_df = tidy_data |> 
+  mutate(
+    city_test_result = map2(unsolved_homicides, total_homicides, ~prop.test(x = .x, n = .y)),
+    city_tidy_result = map(city_test_result, broom::tidy)
+  ) |> 
+  select(city_state, city_tidy_result) |> 
+  unnest(city_tidy_result) |> 
+  select(city_state, estimate, conf.low, conf.high) 
+
+
+city_tidy_df = city_df |> 
+  mutate(confidence_intervals = paste(conf.low, conf.high, sep = ", ")) |> 
+  rename(estimated_proportion = estimate) |> 
+  select(city_state, estimated_proportion, confidence_intervals)
+
+city_tidy_df
+```
+
+```{r, message = FALSE}
+ggplot(city_df, aes(x = reorder(city_state, estimate), y = estimate)) +
+  geom_point(size = 3) +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.2, color = "red") +
+  coord_flip() +  
+  labs(x = "City",
+       y = "Estimated Proportion of Unsolved Homicides",
+       title = "Estimates and Confidence Intervals by City") +
+  theme_minimal()
+```
